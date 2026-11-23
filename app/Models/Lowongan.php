@@ -11,7 +11,7 @@ final class Lowongan extends Entity  {
         return array_values(array_filter(self::getSemuaLowongan(),fn($l)=>mb_stripos($l['namaLowongan'].' '.$l['namaPerusahaan'].' '.$l['deskripsi'],$keyword)!==false));
     }
     public static function getDaftarLowongan(int $idPerusahaan):array {
-        return self::ambil('l.idPerusahaan=? AND l.dihapusPada IS NULL',[$idPerusahaan]);
+        return self::ambil("l.idPerusahaan=? AND l.dihapusPada IS NULL AND l.statusLowongan<>'Draf'",[$idPerusahaan]);
     }
     public static function getLowonganById(int $idLowongan):?self {
         return self::ambil('l.idLowongan=?',[$idLowongan])[0]??null;

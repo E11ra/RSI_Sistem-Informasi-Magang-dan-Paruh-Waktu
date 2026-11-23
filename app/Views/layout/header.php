@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title><?= e($title) ?> · FILKOM Connect</title><link rel="stylesheet" href="assets/app.css">
+<title><?= e($title) ?> · FILKOM Connect</title><link rel="stylesheet" href="assets/app.css"><script src="assets/app.js" defer></script>
 <?php if($currentUser && in_array(query('r'),['lamaran','notifikasi'],true)): ?><meta http-equiv="refresh" content="<?= APP['refresh_seconds'] ?>"><?php endif; ?>
 </head><body>
 <a class="skip-link" href="#main">Lewati navigasi</a>
@@ -22,4 +22,4 @@ foreach($nav as [$link,$ic,$label]):$active=explode('/',$r)[0]===$link||($link==
 <main id="main" class="main-content">
 <?php if($role==='Rekruter'&&$currentUser['statusVerifikasi']!=='Terverifikasi'):?><div class="alert amber"><?= icon('shield') ?><span>Perusahaan berstatus <strong><?= e($currentUser['statusVerifikasi']) ?></strong>. Lengkapi legalitas di <a href="<?= e(url('profil')) ?>">Profil</a>; publikasi menunggu persetujuan admin.</span></div><?php endif; ?>
 <?php else: ?><main id="main" class="public-main"><?php endif; ?>
-<?php foreach($_SESSION['flash']??[] as $f):?><div class="alert <?= e($f['type']) ?>" role="status"><?= icon('check') ?><span><?= e($f['message']) ?></span></div><?php endforeach;unset($_SESSION['flash']); ?>
+<?php foreach($_SESSION['flash']??[] as $f):if(in_array($f['type'],['error','danger'],true))continue;?><div class="alert <?= e($f['type']) ?>" role="status"><?= icon('check') ?><span><?= e($f['message']) ?></span></div><?php endforeach;unset($_SESSION['flash']); ?>

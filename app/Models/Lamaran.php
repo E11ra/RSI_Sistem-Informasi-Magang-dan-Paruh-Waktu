@@ -5,13 +5,10 @@ final class Lamaran extends Entity  {
         return (bool)Database::value("SELECT 1 FROM LAMARAN WHERE idMahasiswa=? AND idLowongan=? AND statusLamaran<>'Draf'",[$idMahasiswa,$idLowongan]);
     }
     public static function getLamaranByMahasiswa(int $idMahasiswa):array {
-        return self::ambil('a.idMahasiswa=?',[$idMahasiswa]);
+        return self::ambil("a.idMahasiswa=? AND a.statusLamaran<>'Draf'",[$idMahasiswa]);
     }
     public static function getLamaranById(int $id):?self {
         return self::ambil('a.idLamaran=?',[$id])[0]??null;
-    }
-    public static function getDraft(int $idMahasiswa,int $idLowongan):?self {
-        return self::ambil("a.idMahasiswa=? AND a.idLowongan=? AND a.statusLamaran='Draf'",[$idMahasiswa,$idLowongan])[0]??null;
     }
     public static function daftarPendaftar(int $idPerusahaan,int $idLowongan=0):array {
         $w="l.idPerusahaan=? AND a.statusLamaran<>'Draf'";
@@ -44,7 +41,7 @@ final class Lamaran extends Entity  {
     public static function izin(int $id):self {
         $u=Auth::require();
         $a=self::getLamaranById($id);
-        if(!$a)fail(404,'Lamaran tidak ditemukan.');
+        if(!$a||$a['statusLamaran']==='Draf')fail(404,'Lamaran tidak ditemukan.');
         if($u['role']==='Mahasiswa'&&(int)$u['idMahasiswa']===(int)$a['idMahasiswa'])return $a;
         if($u['role']==='Rekruter'&&(int)$u['idPerusahaan']===(int)$a['idPerusahaan']&&$a['statusLamaran']!=='Draf')return $a;
         if($u['role']==='Admin'&&$a['statusLamaran']!=='Draf')return $a;

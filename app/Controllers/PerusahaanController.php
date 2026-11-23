@@ -16,61 +16,61 @@ final class PerusahaanController  {
     }
     public function getDetailPerusahaan(int $id):void {
         $p=$this->perusahaan($id);
-        View::render('perusahaan/detail',['title'=>'Verifikasi Perusahaan','perusahaan'=>$p,'dokumen'=>Perusahaan::dokumen($id),'riwayat'=>Database::all('SELECT v.*,a.namaPengguna FROM RIWAYAT_VERIFIKASI v JOIN AKUN a ON a.idAkun=v.idAdmin WHERE v.idPerusahaan=? ORDER BY v.idVerifikasi DESC',[$id]),'lowongan'=>Lowongan::getDaftarLowongan($id)]);
+        $data=['title'=>'Detail Perusahaan','perusahaan'=>$p,'dokumen'=>Perusahaan::dokumen($id),'riwayat'=>Database::all('SELECT v.*,a.namaPengguna FROM RIWAYAT_VERIFIKASI v JOIN AKUN a ON a.idAkun=v.idAdmin WHERE v.idPerusahaan=? ORDER BY v.idVerifikasi DESC',[$id]),'lowongan'=>Lowongan::getDaftarLowongan($id)];
+        $data['versi']=self::versi($p->toArray(),$data['dokumen']);
+        $cache=$data;$cache['perusahaan']=$p->toArray();$cache['lowongan']=array_map(fn($x)=>$x->toArray(),$data['lowongan']);
+        $_SESSION['company_review'][$id]=['user'=>Auth::user(),'data'=>$cache];
+        // Limit cached authorized pages rather than growing the session indefinitely.
+        if(count($_SESSION['company_review'])>5)unset($_SESSION['company_review'][array_key_first($_SESSION['company_review'])]);
+        View::render('perusahaan/detail',$data);
+    }
+    private static function versi(array $company,array $documents):string {
+        return hash('sha256',json([$company,array_map(fn($d)=>[$d['id'],$d['idDokumen'],$d['hasilPemeriksaan']],$documents)]));
     }
     public function periksaDokumen():void {
-        $id=number('idPerusahaan');
-        $this->perusahaan($id);
-        $doc=number('idDokumenPerusahaan');
-        $result=post('hasil');
-        if(!in_array($result,['Sesuai','Tidak sesuai','Bermasalah'],true)||mb_strlen(post('catatan'))>2000)throw new DomainException('Hasil pemeriksaan atau catatan tidak valid.');
-        if(!Database::value('SELECT 1 FROM DOKUMEN_PERUSAHAAN WHERE id=? AND idPerusahaan=?',[$doc,$id]))fail(404,'Dokumen perusahaan tidak ditemukan.');
-        Database::query('UPDATE DOKUMEN_PERUSAHAAN SET hasilPemeriksaan=?,catatan=?,idPemeriksa=? WHERE id=? AND idPerusahaan=?',[$result,post('catatan'),Auth::user()['idAkun'],$doc,$id]);
-        flash('Hasil pemeriksaan dokumen disimpan.');
-        go('perusahaan/detail',['id'=>$id]);
+        $this->perusahaan(number('idPerusahaan'));
+        throw new DomainException('Pemeriksaan dokumen disimpan bersama keputusan Terima atau Tolak.');
     }
     public function verifikasiPerusahaan():void {
-        $id=number('idPerusahaan');
-        $this->perusahaan($id);
-        $result=post('hasil');
-        $note=post('catatan');
-        if(!in_array($result,['Layak','Tidak Layak','Perlu Perbaikan'],true)||!$note||mb_strlen($note)>3000)throw new DomainException('Pilih hasil verifikasi dan isi catatan maksimal 3.000 karakter.');
-        if($result==='Layak') {
-            $docs=Perusahaan::dokumen($id);
-            if(!$docs||array_filter($docs,fn($d)=>$d['hasilPemeriksaan']!=='Sesuai'))throw new DomainException('Periksa seluruh dokumen dan tandai Sesuai sebelum menyatakan perusahaan Layak.');
-        }
-        Database::query('INSERT INTO RIWAYAT_VERIFIKASI(idPerusahaan,idAdmin,hasil,catatan) VALUES (?,?,?,?)',[$id,Auth::user()['idAkun'],$result,$note]);
-        flash('Kesimpulan verifikasi tersimpan. Keputusan persetujuan dapat dilakukan sekarang.');
-        go('perusahaan/detail',['id'=>$id]);
+        $this->periksaDokumen();
     }
     public function putuskanPerusahaan():void {
-        $id=number('idPerusahaan');
-        $this->perusahaan($id);
-        $choice=post('keputusan');
-        $note=post('alasan');
-        if(!in_array($choice,['setujui','tolak'],true)||mb_strlen($note)>3000)throw new DomainException('Keputusan tidak valid.');
+        $id=number('idPerusahaan');$this->perusahaan($id);
+        $choice=post('keputusan');$note=post('alasan');
+        if(!in_array($choice,['setujui','tolak'],true)||mb_strlen($note)>3000)throw new DomainException('Keputusan atau catatan tidak valid.');
         if($choice==='tolak'&&!$note)throw new DomainException('Alasan penolakan wajib diisi.');
-        Database::transaction(function()use($id,$choice,$note) {
+        $reviews=$_POST['pemeriksaan']??[];
+        if(!is_array($reviews))throw new DomainException('Data pemeriksaan tidak valid.');
+        Database::transaction(function()use($id,$choice,$note,$reviews) {
             $p=Database::one('SELECT * FROM PERUSAHAAN WHERE idPerusahaan=? FOR UPDATE',[$id]);
             if(!$p||$p['dihapusPada'])throw new DomainException('Perusahaan tidak tersedia.');
-            if($choice==='setujui') {
-                $last=Database::one('SELECT hasil,dibuatPada FROM RIWAYAT_VERIFIKASI WHERE idPerusahaan=? ORDER BY idVerifikasi DESC LIMIT 1',[$id]);
-                $docs=Perusahaan::dokumen($id);
-                if(!$last||$last['hasil']!=='Layak'||!$docs||array_filter($docs,fn($d)=>$d['hasilPemeriksaan']!=='Sesuai'))throw new DomainException('Dokumen belum dinyatakan sesuai atau kesimpulan terakhir belum Layak.');
+            if($p['statusVerifikasi']!=='Menunggu')throw new DomainException('Perusahaan tidak sedang menunggu peninjauan. Muat ulang halaman untuk melihat status terbaru.');
+            $docs=Perusahaan::dokumen($id);
+            if(!hash_equals(self::versi($p,$docs),post('versi')))throw new DomainException('Data atau dokumen perusahaan telah berubah. Periksa data terbaru sebelum mengambil keputusan.');
+            $ids=array_map(fn($d)=>(string)$d['id'],$docs);
+            foreach($reviews as $docId=>$review)if(!in_array((string)$docId,$ids,true)||!is_array($review))throw new DomainException('Dokumen pemeriksaan tidak sesuai perusahaan.');
+            if($choice==='setujui'&&!$docs)throw new DomainException('Dokumen legalitas wajib tersedia sebelum perusahaan diterima.');
+            foreach($docs as $doc) {
+                $review=$reviews[$doc['id']]??[];$result=$review['hasil']??'';$catatan=$review['catatan']??'';
+                if(!is_string($result)||!is_string($catatan)||mb_strlen($catatan)>2000)throw new DomainException('Catatan pemeriksaan dokumen tidak valid.');
+                if($result!==''&&!in_array($result,['Sesuai','Tidak sesuai','Bermasalah'],true))throw new DomainException('Hasil pemeriksaan dokumen tidak valid.');
+                if($choice==='setujui'&&$result!=='Sesuai')throw new DomainException('Periksa semua dokumen dan pilih Sesuai sebelum menerima perusahaan.');
+                if($result!=='')Database::query('UPDATE DOKUMEN_PERUSAHAAN SET hasilPemeriksaan=?,catatan=?,idPemeriksa=? WHERE id=? AND idPerusahaan=?',[$result,$catatan,Auth::user()['idAkun'],$doc['id'],$id]);
             }
             $status=$choice==='setujui'?'Terverifikasi':'Ditolak';
             $message=$note?:'Perusahaan memenuhi persyaratan verifikasi.';
+            Database::query('INSERT INTO RIWAYAT_VERIFIKASI(idPerusahaan,idAdmin,hasil,catatan) VALUES (?,?,?,?)',[$id,Auth::user()['idAkun'],$choice==='setujui'?'Layak':'Tidak Layak',$message]);
             Database::query('UPDATE PERUSAHAAN SET statusVerifikasi=?,catatanVerifikasi=? WHERE idPerusahaan=?',[$status,$message,$id]);
             Database::query('INSERT INTO RIWAYAT_VERIFIKASI(idPerusahaan,idAdmin,hasil,catatan) VALUES (?,?,?,?)',[$id,Auth::user()['idAkun'],$status,$message]);
             Notifikasi::perusahaan($id,'Hasil verifikasi: '.$status,$message,url('profil'));
-        }
-        );
-        flash('Keputusan perusahaan tersimpan dan rekruter menerima notifikasi.');
-        go('perusahaan/detail',['id'=>$id]);
+        });
+        unset($_SESSION['form_values']['perusahaan/detail|'.$id]);
+        flash('Keputusan perusahaan tersimpan dan rekruter menerima notifikasi.');go('perusahaan/detail',['id'=>$id]);
     }
     public function hapusPerusahaan():void {
         $id=number('idPerusahaan');
         $p=$this->perusahaan($id);
+        if($p['statusVerifikasi']!=='Terverifikasi')throw new DomainException('Penghapusan karena pelanggaran berlaku untuk perusahaan terverifikasi.');
         $note=post('alasan');
         if(!isset($_POST['konfirmasi'])) {
             View::render('confirm',['title'=>'Hapus perusahaan ini?','message'=>$p['namaPerusahaan'].' dan seluruh lowongannya akan disembunyikan. Akun rekruter dinonaktifkan. Riwayat lamaran mahasiswa dipertahankan.','route'=>'perusahaan/hapus','fields'=>['idPerusahaan'=>$id,'alasan'=>$note],'back'=>url('perusahaan/detail',['id'=>$id])]);
@@ -78,6 +78,8 @@ final class PerusahaanController  {
         }
         if(!$note||mb_strlen($note)>3000)throw new DomainException('Tuliskan alasan/bukti pelanggaran sebelum menghapus perusahaan.');
         Database::transaction(function()use($id,$note) {
+            $locked=Database::one('SELECT statusVerifikasi,dihapusPada FROM PERUSAHAAN WHERE idPerusahaan=? FOR UPDATE',[$id]);
+            if(!$locked||$locked['dihapusPada']||$locked['statusVerifikasi']!=='Terverifikasi')throw new DomainException('Status perusahaan telah berubah.');
             Database::query("UPDATE PERUSAHAAN SET dihapusPada=NOW(),statusVerifikasi='Dihapus',catatanVerifikasi=? WHERE idPerusahaan=?",[$note,$id]);
             Database::query("UPDATE LOWONGAN SET dihapusPada=NOW(),statusLowongan='Ditutup' WHERE idPerusahaan=?",[$id]);
             Database::query('UPDATE AKUN SET aktif=0 WHERE idPerusahaan=?',[$id]);

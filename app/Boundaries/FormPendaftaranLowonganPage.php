@@ -2,8 +2,8 @@
 declare(strict_types=1);
 final class FormPendaftaranLowonganPage  {
     private static function render(Lowongan $lowongan,array $errors=[],string $pesan=''):void  {
-        $draft=Lamaran::getDraft(Auth::mahasiswaId(),(int)$lowongan['idLowongan']);
-        View::render('lamaran/form',['title'=>'Pendaftaran Lowongan','lowongan'=>$lowongan, 'mahasiswa'=>Mahasiswa::getMahasiswa(Auth::mahasiswaId()),'draft'=>$draft,'errors'=>$errors,'pesan'=>$pesan, 'dokumenInfo'=>Dokumen::informasi($draft?$draft['dokumenPersyaratan']:[]), 'tahapan'=>TahapSeleksi::getTahapByLowongan((int)$lowongan['idLowongan'])]);
+        $state=LamaranController::unggahanSementara((int)$lowongan['idLowongan']);
+        View::render('lamaran/form',['title'=>'Pendaftaran Lowongan','lowongan'=>$lowongan, 'mahasiswa'=>Mahasiswa::getMahasiswa(Auth::mahasiswaId()),'state'=>$state,'errors'=>$pesan?[$pesan,...$errors]:$errors,'pesan'=>$pesan, 'dokumenInfo'=>Dokumen::informasi($state['dokumenPersyaratan']), 'tahapan'=>TahapSeleksi::getTahapByLowongan((int)$lowongan['idLowongan'])]);
     }
     public static function tampilkanFormPendaftaran(Lowongan $lowongan):void {
         self::render($lowongan);

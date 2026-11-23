@@ -5,7 +5,7 @@ final class RekapitulasiController  {
         $u=Auth::require(['Rekruter','Admin']);
         $where=$u['role']==='Rekruter'?'l.idPerusahaan=?':'1=1';
         $p=$u['role']==='Rekruter'?[$u['idPerusahaan']]:[];
-        return Database::all("SELECT l.idLowongan,l.namaLowongan,p.namaPerusahaan,l.statusLowongan,l.dihapusPada,COUNT(a.idLamaran) total,SUM(CASE WHEN a.statusLamaran='Diterima' THEN 1 ELSE 0 END) diterima,SUM(CASE WHEN a.statusLamaran='Ditolak' THEN 1 ELSE 0 END) ditolak,SUM(CASE WHEN a.statusLamaran='Wawancara' THEN 1 ELSE 0 END) wawancara FROM LOWONGAN l JOIN PERUSAHAAN p ON p.idPerusahaan=l.idPerusahaan LEFT JOIN LAMARAN a ON a.idLowongan=l.idLowongan AND a.statusLamaran<>'Draf' WHERE $where GROUP BY l.idLowongan,l.namaLowongan,p.namaPerusahaan,l.statusLowongan,l.dihapusPada ORDER BY l.idLowongan DESC",$p);
+        return Database::all("SELECT l.idLowongan,l.namaLowongan,p.namaPerusahaan,l.statusLowongan,l.dihapusPada,COUNT(a.idLamaran) total,SUM(CASE WHEN a.statusLamaran='Diterima' THEN 1 ELSE 0 END) diterima,SUM(CASE WHEN a.statusLamaran='Ditolak' THEN 1 ELSE 0 END) ditolak,SUM(CASE WHEN a.statusLamaran='Wawancara' THEN 1 ELSE 0 END) wawancara FROM LOWONGAN l JOIN PERUSAHAAN p ON p.idPerusahaan=l.idPerusahaan LEFT JOIN LAMARAN a ON a.idLowongan=l.idLowongan AND a.statusLamaran<>'Draf' WHERE $where AND l.statusLowongan<>'Draf' GROUP BY l.idLowongan,l.namaLowongan,p.namaPerusahaan,l.statusLowongan,l.dihapusPada ORDER BY l.idLowongan DESC",$p);
     }
     private function mahasiswa():array  {
         $u=Auth::require(['Rekruter','Admin']);

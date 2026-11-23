@@ -27,11 +27,9 @@ $_SESSION['csrf']??=bin2hex(random_bytes(32));
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: SAMEORIGIN');
 header('Referrer-Policy: same-origin');
-header("Content-Security-Policy: default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
+header("Content-Security-Policy: default-src 'self'; style-src 'self'; img-src 'self' data:; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'");
 header('Cache-Control: no-store, private');
 set_exception_handler(function(Throwable $e):void {
     error_log((string)$e);
-    http_response_code(500);
-    echo '<!doctype html><html lang="id"><meta charset="utf-8"><title>Permintaan belum selesai</title><link rel="stylesheet" href="assets/app.css"><main class="standalone card"><h1>Permintaan belum selesai</h1><p>Silakan coba kembali. Jika ini pemasangan pertama, impor database dan periksa konfigurasi koneksi.</p><a class="button" href="index.php">Kembali ke aplikasi</a></main></html>';
-}
-);
+    ErrorHandler::handle($e instanceof DomainException?422:500,$e instanceof DomainException?$e->getMessage():'Proses belum berhasil. Silakan coba kembali.');
+});

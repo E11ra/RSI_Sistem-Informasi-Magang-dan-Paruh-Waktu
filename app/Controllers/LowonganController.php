@@ -21,7 +21,7 @@ final class LowonganController  {
     public function getDetailLowongan(int $idLowongan):void {
         $u=Auth::require();
         $l=Lowongan::getLowonganById($idLowongan);
-        if(!$l)fail(404,'Lowongan tidak tersedia.');
+        if(!$l||$l['statusLowongan']==='Draf')fail(404,'Lowongan tidak tersedia.');
         if($u['role']==='Mahasiswa') {
             (new LamaranController())->cekStatusMelamar((int)$u['idMahasiswa'],$idLowongan);
             return;
@@ -30,21 +30,22 @@ final class LowonganController  {
         DetailLowonganPage::tampilkanDetail($l,'');
     }
     public function bukaFormLowongan(int $idPerusahaan):void {
-        Auth::require(['Rekruter']);
+        Auth::verified();
         if($idPerusahaan!==$this->idPerusahaan)fail(403,'Akses perusahaan ditolak.');
         $id=number('id');
         $state=$_SESSION['lowongan_form']??null;
         if(query('baru')==='1'||!$state||(int)$state['idLowongan']!==$id) {
             $l=$id?$this->milik($id):null;
-            $data=$l?$l->toArray():['idLowongan'=>0,'namaLowongan'=>'','jenisPekerjaan'=>'Magang','modeKerja'=>'Hybrid','lokasiPenempatan'=>'','tingkatSemesterMinimal'=>3,'targetJurusan'=>['Sistem Informasi'],'deskripsi'=>'','kualifikasi'=>'','dokumenPersyaratan'=>['CV','Transkrip'],'batasLamaran'=>date('Y-m-d',strtotime('+30 days')),'kuota'=>3,'durasiBulan'=>3,'uangSaku'=>0,'konversiSKS'=>0,'statusLowongan'=>'Draf'];
+            $data=$l?$l->toArray():['idLowongan'=>0,'namaLowongan'=>'','jenisPekerjaan'=>'Magang','modeKerja'=>'Hybrid','lokasiPenempatan'=>'','tingkatSemesterMinimal'=>3,'targetJurusan'=>['Sistem Informasi'],'deskripsi'=>'','kualifikasi'=>'','dokumenPersyaratan'=>['CV','Transkrip'],'batasLamaran'=>date('Y-m-d',strtotime('+30 days')),'kuota'=>3,'durasiBulan'=>3,'uangSaku'=>0,'konversiSKS'=>0,'statusLowongan'=>'Aktif'];
             $data['daftarTahap']=$id?array_map(fn($t)=>$t->toArray(),TahapSeleksi::getTahapByLowongan($id)):[['namaTahap'=>'Seleksi Administrasi','keterangan'=>'Pemeriksaan profil dan dokumen.'],['namaTahap'=>'Tes Teknis','keterangan'=>'Penilaian kemampuan sesuai posisi.'],['namaTahap'=>'Wawancara','keterangan'=>'Diskusi bersama rekruter.']];
             $_SESSION['lowongan_form']=$data;
         }
         FormPembuatanLowonganPage::tampilkanForm(Perusahaan::getPerusahaan($idPerusahaan));
     }
     public function prosesForm():void {
-        Auth::require(['Rekruter']);
+        Auth::verified();
         $action=post('aksiForm','publikasi');
+        if(!in_array($action,['publikasi','tambah','batal','kembali','konfirmasi_batal'],true)&&!preg_match('/^hapus:\d+$/',$action))throw new DomainException('Tindakan lowongan tidak tersedia.');
         if($action==='konfirmasi_batal') {
             $this->batalkanPembuatan();
             return;
@@ -61,7 +62,8 @@ final class LowonganController  {
         $d['idLowongan']=$id;
         $d['targetJurusan']=array_values(array_intersect(jurusanOptions(),is_array($_POST['targetJurusan']??null)?$_POST['targetJurusan']:[]));
         $d['dokumenPersyaratan']=array_values(array_intersect(array_keys(documentOptions()),is_array($_POST['dokumenPersyaratan']??null)?$_POST['dokumenPersyaratan']:[]));
-        $d['statusLowongan']=$action==='draf'?'Draf':'Aktif';
+        $d['dokumenPersyaratan']=array_values(array_unique(['CV',...$d['dokumenPersyaratan']]));
+        $d['statusLowongan']='Aktif';
         $d['batasLamaran']=$d['batasLamaran']?:null;
         $t=[];
         foreach(array_slice(is_array($_POST['tahap']??null)?$_POST['tahap']:[],0,12) as $row)if(is_array($row))$t[]=['namaTahap'=>trim((string)($row['namaTahap']??'')),'keterangan'=>trim((string)($row['keterangan']??''))];
@@ -77,56 +79,55 @@ final class LowonganController  {
             FormPembuatanLowonganPage::tampilkanKonfirmasiBatal();
             return;
         }
-        if(in_array($action,['tambah','periksa'],true)||str_starts_with($action,'hapus:')) {
+        if($action==='tambah'||str_starts_with($action,'hapus:')) {
             FormPembuatanLowonganPage::tampilkanForm(Perusahaan::getPerusahaan($this->idPerusahaan));
             return;
         }
         $this->buatLowongan(new Lowongan($d),array_map(fn($r)=>new TahapSeleksi($r),$t));
     }
     public function buatLowongan(Lowongan $dataLowongan,array $daftarTahap):void {
+        Auth::verified();
+        if($dataLowongan['statusLowongan']!=='Aktif')throw new DomainException('Lowongan hanya dapat disimpan sebagai publikasi aktif.');
         $errors=$this->validasiData($dataLowongan,$daftarTahap);
-        $draft=$dataLowongan['statusLowongan']==='Draf';
-        if(!$draft&&Perusahaan::getPerusahaan($this->idPerusahaan)['statusVerifikasi']!=='Terverifikasi')$errors['umum']='Perusahaan belum disetujui admin. Simpan sebagai draf terlebih dahulu.';
         if($errors) {
             http_response_code(422);
             FormPembuatanLowonganPage::tampilkanErrorKolom($errors);
             return;
         }
         $id=(int)$dataLowongan['idLowongan'];
-        Database::transaction(function()use($dataLowongan,$daftarTahap,$id,$draft) {
+        Database::transaction(function()use($dataLowongan,$daftarTahap,$id) {
             // Kunci sama dengan jalur pendaftaran untuk mencegah roadmap berubah saat lamaran dikirim.
             if($id) {
                 $old=Database::one('SELECT * FROM LOWONGAN WHERE idLowongan=? AND idPerusahaan=? FOR UPDATE',[$id,$this->idPerusahaan]);
                 if(!$old)throw new DomainException('Lowongan tidak ditemukan.');
                 $count=(int)Database::value("SELECT COUNT(*) FROM LAMARAN WHERE idLowongan=? AND statusLamaran<>'Draf'",[$id]);
-                if($count&&$draft)throw new DomainException('Lowongan dengan lamaran terkirim tidak dapat diubah menjadi draf. Gunakan Tutup Lowongan.');
+
             }
             $p=Database::one('SELECT statusVerifikasi FROM PERUSAHAAN WHERE idPerusahaan=? FOR UPDATE',[$this->idPerusahaan]);
-            if(!$draft&&$p['statusVerifikasi']!=='Terverifikasi')throw new DomainException('Verifikasi perusahaan belum disetujui.');
+            if($p['statusVerifikasi']!=='Terverifikasi')throw new DomainException('Verifikasi perusahaan belum disetujui.');
             $newId=Lowongan::simpan($dataLowongan,$this->idPerusahaan);
             TahapSeleksi::simpanRoadmap($newId,$daftarTahap);
         }
         );
         unset($_SESSION['lowongan_form']);
-        flash($draft?'Draf lowongan tersimpan.':'Lowongan berhasil dipublikasikan!');
+        flash('Lowongan berhasil dipublikasikan!');
         go('lowongan');
     }
     private function validasiData(Lowongan $d,array $t):array {
         $error=[];
-        $draft=$d['statusLowongan']==='Draf';
         foreach(['namaLowongan'=>100,'lokasiPenempatan'=>100,'deskripsi'=>15000,'kualifikasi'=>10000] as $k=>$max) {
-            if(!$draft&&$k!=='kualifikasi'&&trim((string)$d[$k])==='')$error[$k]='Kolom ini wajib diisi.';
+            if($k!=='kualifikasi'&&trim((string)$d[$k])==='')$error[$k]='Kolom ini wajib diisi.';
             if(mb_strlen((string)$d[$k])>$max)$error[$k]="Maksimal $max karakter.";
         }
-        if(trim((string)$d['namaLowongan'])==='')$error['namaLowongan']='Nama lowongan wajib diisi, termasuk untuk draf.';
+        if(trim((string)$d['namaLowongan'])==='')$error['namaLowongan']='Nama lowongan wajib diisi.';
         if(!in_array($d['jenisPekerjaan'],['Magang','Paruh Waktu'],true))$error['jenisPekerjaan']='Pilih jenis pekerjaan yang valid.';
         if(!in_array($d['modeKerja'],['WFO','WFH','Hybrid'],true))$error['modeKerja']='Pilih mode kerja yang valid.';
         foreach(['tingkatSemesterMinimal'=>[1,14],'kuota'=>[1,10000],'durasiBulan'=>[1,36],'uangSaku'=>[0,1000000000],'konversiSKS'=>[0,24]] as $k=>[$lo,$hi])if(filter_var($d[$k],FILTER_VALIDATE_INT)===false||(int)$d[$k]<$lo||(int)$d[$k]>$hi)$error[$k]="Masukkan bilangan bulat $lo–$hi.";
-        if(!$draft&&!$d['targetJurusan'])$error['targetJurusan']='Pilih minimal satu jurusan.';
-        if(!$draft&&!$d['dokumenPersyaratan'])$error['dokumenPersyaratan']='Pilih minimal satu dokumen wajib.';
-        if(!$draft&&!$t)$error['roadmapSeleksi']='Tambahkan minimal satu tahap seleksi.';
+        if(!$d['targetJurusan'])$error['targetJurusan']='Pilih minimal satu jurusan.';
+        if(!$d['dokumenPersyaratan'])$error['dokumenPersyaratan']='Pilih minimal satu dokumen wajib.';
+        if(!$t)$error['roadmapSeleksi']='Tambahkan minimal satu tahap seleksi.';
         foreach($t as $row)if(trim((string)$row['namaTahap'])===''||mb_strlen($row['namaTahap'])>100||mb_strlen((string)$row['keterangan'])>2000)$error['roadmapSeleksi']='Isi nama setiap tahap (maksimal 100 karakter) dan keterangan maksimal 2.000 karakter.';
-        if($d['batasLamaran'] && (!preg_match('/^\d{4}-\d{2}-\d{2}$/',$d['batasLamaran'])||date('Y-m-d',strtotime($d['batasLamaran']))!==$d['batasLamaran']||(!$draft&&$d['batasLamaran']<date('Y-m-d'))))$error['batasLamaran']='Batas lamaran harus berupa tanggal hari ini atau sesudahnya.';
+        if($d['batasLamaran'] && (!preg_match('/^\d{4}-\d{2}-\d{2}$/',$d['batasLamaran'])||date('Y-m-d',strtotime($d['batasLamaran']))!==$d['batasLamaran']||($d['batasLamaran']<date('Y-m-d'))))$error['batasLamaran']='Batas lamaran harus berupa tanggal hari ini atau sesudahnya.';
         return $error;
     }
     public function batalkanPembuatan():void {
@@ -149,7 +150,7 @@ final class LowonganController  {
     }
     private function milik(int $id):Lowongan {
         $l=Lowongan::getLowonganById($id);
-        if(!$l||$l['dihapusPada'])fail(404,'Lowongan tidak ditemukan.');
+        if(!$l||$l['dihapusPada']||$l['statusLowongan']==='Draf')fail(404,'Lowongan tidak ditemukan.');
         if((int)$l['idPerusahaan']!==Auth::perusahaanId())fail(403,'Lowongan bukan milik perusahaan Anda.');
         return $l;
     }
