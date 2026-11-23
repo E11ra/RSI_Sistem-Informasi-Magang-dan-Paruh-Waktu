@@ -1,0 +1,1 @@
+<section class="empty-state card"><div class="empty-icon"><?= icon('shield') ?></div><p class="eyebrow">PERMINTAAN TIDAK DAPAT DIPROSES</p><h1><?= e(http_response_code()) ?></h1><p><?= e($message) ?></p><a class="button" href="<?= e(url()) ?>">Kembali ke beranda <?= icon('arrow') ?></a></section>
